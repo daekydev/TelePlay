@@ -1,4 +1,4 @@
-name: Android TV Release
+name: Android Release
 
 on:
   push:
