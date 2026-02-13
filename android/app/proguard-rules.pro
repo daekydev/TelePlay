@@ -24,3 +24,9 @@
 
 # FFmpeg extension
 -keep class com.github.ArmynC.** { *; }
+
+# TV / Leanback (required for TV launcher to find the correct activity)
+-keep class androidx.leanback.** { *; }
+-keep class androidx.tv.** { *; }
+-keep class com.telegramtv.ui.MainActivity { *; }
+-keep class com.telegramtv.ui.mobile.MobileMainActivity { *; }
