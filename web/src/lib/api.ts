@@ -257,14 +257,16 @@ export const useVerifyLoginCode = () => {
 
 // ============== Files Hooks ==============
 
-export const useFiles = (folderId?: number | null, fileType?: string, search?: string) => {
+export const useFiles = (folderId?: number | null, fileType?: string, search?: string, page = 1) => {
     return useQuery({
-        queryKey: ['files', folderId, fileType, search],
+        queryKey: ['files', folderId, fileType, search, page],
         queryFn: async () => {
             const params: Record<string, any> = {};
             if (folderId !== undefined) params.folder_id = folderId;
             if (fileType) params.file_type = fileType;
             if (search) params.search = search;
+            params.page = page;
+            params.per_page = 50; // Load 50 files per page
             const { data } = await api.get<FileListResponse>('/files', { params });
             return data;
         },
