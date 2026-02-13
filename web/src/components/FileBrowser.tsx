@@ -49,7 +49,8 @@ export default function FileBrowser() {
         selectionBox,
         setSelectionBox,
         activeSection,
-        addToast
+        addToast,
+        setSelectedFiles
     } = useAppStore();
 
     // Data Fetching
@@ -411,6 +412,12 @@ export default function FileBrowser() {
         setPreviewFile, setShowNewFolder, setMoveItems, setDeleteConfirm, 
         clearSelection, selectAll, setRenameFile, navigateToBreadcrumb, setClipboard, folders
     ]);
+
+    // Keep selectedFiles in sync with selectedFileIds
+    useEffect(() => {
+        const selectedFiles = displayFiles?.filter(f => selectedFileIds.has(f.id)) || [];
+        setSelectedFiles(selectedFiles);
+    }, [selectedFileIds, displayFiles, setSelectedFiles]);
 
     return (
         <div className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
