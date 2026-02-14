@@ -63,6 +63,19 @@ export default function FileBrowser() {
     const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50);
     const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50);
     
+
+    // For files section, accumulate files from all pages
+    useEffect(() => {
+        if (filesList && activeSection === 'files') {
+            setAllFiles(prev => {
+                const existingIds = new Set(prev.map(f => f.id));
+                const newFiles = filesList.files.filter(f => !existingIds.has(f.id));
+                return [...prev, ...newFiles];
+            });
+            setHasMore(filesList.page * filesList.per_page < filesList.total);
+        }
+    }, [filesList, activeSection]);
+
     // Determine which files to show
     let displayFiles: TelegramFile[] | undefined;
     let isLoading = false;
@@ -74,18 +87,6 @@ export default function FileBrowser() {
         displayFiles = cwFiles?.files;
         isLoading = cwLoading;
     } else {
-        // For files section, accumulate files from all pages
-        useEffect(() => {
-            if (filesList && activeSection === 'files') {
-                setAllFiles(prev => {
-                    const existingIds = new Set(prev.map(f => f.id));
-                    const newFiles = filesList.files.filter(f => !existingIds.has(f.id));
-                    return [...prev, ...newFiles];
-                });
-                setHasMore(filesList.page * filesList.per_page < filesList.total);
-            }
-        }, [filesList, activeSection]);
-
         displayFiles = allFiles;
         isLoading = filesLoading;
     }
