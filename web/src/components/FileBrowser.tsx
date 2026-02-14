@@ -53,11 +53,29 @@ export default function FileBrowser() {
         setSelectedFiles
     } = useAppStore();
 
+    // Pagination state
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [allFiles, setAllFiles] = useState<TelegramFile[]>([]);
+
     // Data Fetching
-    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined);
+    const { data: filesList, isLoading: filesLoading, refetch: refetchFiles } = useFiles(currentFolderId, fileTypeFilter || undefined, searchQuery || undefined, page);
     const { data: recentFiles, isLoading: recentLoading, refetch: refetchRecent } = useRecentFiles(50);
     const { data: cwFiles, isLoading: cwLoading, refetch: refetchCW } = useContinueWatching(50);
     
+
+    // For files section, accumulate files from all pages
+    useEffect(() => {
+        if (filesList && activeSection === 'files') {
+            setAllFiles(prev => {
+                const existingIds = new Set(prev.map(f => f.id));
+                const newFiles = filesList.files.filter(f => !existingIds.has(f.id));
+                return [...prev, ...newFiles];
+            });
+            setHasMore(filesList.page * filesList.per_page < filesList.total);
+        }
+    }, [filesList, activeSection]);
+
     // Determine which files to show
     let displayFiles: TelegramFile[] | undefined;
     let isLoading = false;
@@ -69,7 +87,7 @@ export default function FileBrowser() {
         displayFiles = cwFiles?.files;
         isLoading = cwLoading;
     } else {
-        displayFiles = filesList?.files;
+        displayFiles = allFiles;
         isLoading = filesLoading;
     }
 
@@ -419,6 +437,32 @@ export default function FileBrowser() {
         setSelectedFiles(selectedFiles);
     }, [selectedFileIds, displayFiles, setSelectedFiles]);
 
+    // Infinite scrolling
+    useEffect(() => {
+        const handleScroll = () => {
+            if (containerRef.current && !isLoading && hasMore && activeSection === 'files') {
+                const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+                if (scrollTop + clientHeight >= scrollHeight - 100) {
+                    // Load more files
+                    setPage(prev => prev + 1);
+                }
+            }
+        };
+
+        const container = containerRef.current;
+        if (container) {
+            container.addEventListener('scroll', handleScroll);
+            return () => container.removeEventListener('scroll', handleScroll);
+        }
+    }, [isLoading, hasMore, activeSection]);
+
+    // Reset pagination when filters change
+    useEffect(() => {
+        setPage(1);
+        setAllFiles([]);
+        setHasMore(true);
+    }, [currentFolderId, fileTypeFilter, searchQuery, activeSection]);
+
     return (
         <div className="flex h-screen bg-dark-950 text-white selection:bg-primary-500/30 overflow-hidden">
             <Sidebar isOpen={isSidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -645,6 +689,20 @@ export default function FileBrowser() {
                                 />
                             )}
                         </>
+                    )}
+
+                    {/* Loading indicator for infinite scroll */}
+                    {activeSection === 'files' && isLoading && hasMore && (
+                        <div className="flex justify-center py-4">
+                            <div className="w-6 h-6 border-2 border-primary-500/30 border-t-primary-500 rounded-full animate-spin"></div>
+                        </div>
+                    )}
+
+                    {/* No more files message */}
+                    {activeSection === 'files' && !hasMore && allFiles.length > 0 && (
+                        <div className="text-center py-4 text-dark-400">
+                            No more files
+                        </div>
                     )}
                 </div>
             </main>
