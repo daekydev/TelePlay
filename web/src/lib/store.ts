@@ -39,6 +39,7 @@ interface AppState {
 
     moveItems: { files: TelegramFile[], folders: Folder[] } | null;
     setMoveItems: (items: { files: TelegramFile[], folders: Folder[] } | null) => void;
+    setMoveFiles: (files: TelegramFile[]) => void;
 
     showNewFolder: boolean;
     setShowNewFolder: (show: boolean) => void;
@@ -65,6 +66,8 @@ interface AppState {
     // Context menu - only one can be open at a time, with position for fixed positioning
     activeContextMenu: { type: 'file'; item: TelegramFile; x: number; y: number } | { type: 'folder'; item: Folder; x: number; y: number } | null;
     setActiveContextMenu: (menu: { type: 'file'; item: TelegramFile; x: number; y: number } | { type: 'folder'; item: Folder; x: number; y: number } | null) => void;
+    selectedFiles: TelegramFile[];
+    setSelectedFiles: (files: TelegramFile[]) => void;
 
     // Navigation Section
     activeSection: 'files' | 'recent' | 'continue_watching';
@@ -146,6 +149,9 @@ export const useAppStore = create<AppState>((set) => ({
 
     moveItems: null,
     setMoveItems: (items) => set({ moveItems: items }),
+    setMoveFiles: (files) => set({ moveItems: { files, folders: [] } }),
+    selectedFiles: [],
+    setSelectedFiles: (files) => set({ selectedFiles: files }),
 
     showNewFolder: false,
     setShowNewFolder: (show) => set({ showNewFolder: show }),

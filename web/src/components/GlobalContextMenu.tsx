@@ -4,7 +4,7 @@ import { TelegramFile, Folder, api } from '../lib/api';
 import { Play, Download, Link, Edit, FolderInput, Trash2, Globe, ShieldOff, HardDriveDownload } from 'lucide-react';
 
 export default function GlobalContextMenu() {
-    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, selectedFileIds } = useAppStore();
+    const { activeContextMenu, setActiveContextMenu, setPreviewFile, setMoveItems, setMoveFiles, setDeleteConfirm, setRenameFile, setRenameFolder, selectedFileIds, selectedFiles } = useAppStore();
     const menuRef = useRef<HTMLDivElement>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -162,7 +162,7 @@ export default function GlobalContextMenu() {
                                 <div className="px-3 py-2 text-xs font-medium text-dark-400 uppercase tracking-wider">
                                     {selectedFileIds.size} Selected
                                 </div>
-                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveFiles(Array.from(selectedFileIds)))}>
+                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveFiles(selectedFiles))}>
                                     <FolderInput className="w-4 h-4" />
                                     Move ({selectedFileIds.size}) Items
                                 </button>
@@ -232,7 +232,7 @@ export default function GlobalContextMenu() {
                                     <Edit className="w-4 h-4" />
                                     Rename
                                 </button>
-                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveFiles([activeContextMenu.item as TelegramFile]))}>
+                                <button className="context-menu-item w-full text-left" onClick={() => handleAction(() => setMoveItems({ files: [activeContextMenu.item as TelegramFile], folders: [] }))}>
                                     <FolderInput className="w-4 h-4" />
                                     Move to...
                                 </button>
