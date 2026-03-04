@@ -261,6 +261,8 @@ class PlayerViewModel @Inject constructor(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Save progress immediately before transitioning to error state
+                saveProgress()
                 val parsedError = parsePlaybackError(error)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
@@ -609,6 +611,9 @@ class PlayerViewModel @Inject constructor(
      * Retry playback after error.
      */
     fun retry() {
+        // Save current position before clearing so we can resume from here
+        resumePosition = exoPlayer.currentPosition.coerceAtLeast(0)
+        saveProgress()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         loadAndPlay()
@@ -627,6 +632,7 @@ class PlayerViewModel @Inject constructor(
     fun togglePlayback() {
         if (exoPlayer.isPlaying) {
             exoPlayer.pause()
+            saveProgress()
         } else {
             exoPlayer.play()
         }
@@ -906,6 +912,9 @@ class PlayerViewModel @Inject constructor(
     fun saveProgress(completed: Boolean = false) {
         val position = (exoPlayer.currentPosition / 1000).toInt()
         val duration = (exoPlayer.duration / 1000).toInt().takeIf { it > 0 }
+
+        // Don't save if position is 0 (initial load failure or not yet started)
+        if (position <= 0 && !completed) return
 
         progressSaveJob?.cancel()
         progressSaveJob = viewModelScope.launch {
