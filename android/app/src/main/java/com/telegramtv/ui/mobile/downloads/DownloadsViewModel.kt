@@ -1,32 +1,39 @@
 package com.telegramtv.ui.mobile.downloads
 
-import android.app.DownloadManager
-import android.content.Context
-import android.database.Cursor
-import android.net.Uri
+import android.os.Environment
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import com.telegramtv.download.DownloadStatus
+import com.telegramtv.download.DownloadTask
+import com.telegramtv.download.FileDownloader
+import com.telegramtv.data.repository.AuthRepository
+import com.telegramtv.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import android.content.Context
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import java.io.File
 
+/**
+ * Unified download item for the UI layer.
+ * Works with both the custom FileDownloader and legacy DownloadManager items.
+ */
 data class DownloadItem(
     val id: Long,
     val title: String,
-    val status: Int, // DownloadManager.STATUS_*
+    val status: DownloadStatus,
     val totalSize: Long,
     val downloadedSize: Long,
-    val speed: Long = 0L, // bytes per second
-    val localUri: String?,
-    val mediaType: String?,
+    val speed: Long = 0L,
+    val localPath: String? = null,
+    val mimeType: String? = null,
     val fileId: Int? = null
 )
 
@@ -37,99 +44,60 @@ data class DownloadsUiState(
 
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val fileDownloader: FileDownloader,
+    private val settingsRepository: SettingsRepository,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(DownloadsUiState())
-    val uiState: StateFlow<DownloadsUiState> = _uiState.asStateFlow()
-
-    private val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-
-    init {
-        startPolling()
-    }
-
-    private fun startPolling() {
-        viewModelScope.launch {
-            while (true) {
-                loadDownloads()
-                delay(2000) // Poll every 2 seconds
+    val uiState: StateFlow<DownloadsUiState> = fileDownloader.tasks.map { tasksMap ->
+        val items = tasksMap.values
+            .sortedByDescending { it.id }
+            .map { task ->
+                DownloadItem(
+                    id = task.id,
+                    title = task.fileName,
+                    status = task.status,
+                    totalSize = task.totalBytes,
+                    downloadedSize = task.downloadedBytes,
+                    speed = task.speed,
+                    localPath = task.localPath,
+                    mimeType = task.mimeType,
+                    fileId = task.fileId
+                )
             }
-        }
-    }
+        DownloadsUiState(downloads = items)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DownloadsUiState())
 
-    private val lastSizeMap = mutableMapOf<Long, Long>()
-    private val lastTimeMap = mutableMapOf<Long, Long>()
-
-    private suspend fun loadDownloads() = withContext(Dispatchers.IO) {
-        val query = DownloadManager.Query()
-        val cursor = downloadManager.query(query)
-        val items = mutableListOf<DownloadItem>()
-        val currentTime = System.currentTimeMillis()
-
-        cursor.use {
-            if (it.moveToFirst()) {
-                val idCol = it.getColumnIndex(DownloadManager.COLUMN_ID)
-                val titleCol = it.getColumnIndex(DownloadManager.COLUMN_TITLE)
-                val statusCol = it.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                val totalSizeCol = it.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-                val downloadedSizeCol = it.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                val uriCol = it.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                val typeCol = it.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
-                val descCol = it.getColumnIndex(DownloadManager.COLUMN_DESCRIPTION)
-
-                do {
-                    val id = it.getLong(idCol)
-                    val title = it.getString(titleCol)
-                    val status = it.getInt(statusCol)
-                    val totalSize = it.getLong(totalSizeCol)
-                    val downloadedSize = it.getLong(downloadedSizeCol)
-                    val localUri = it.getString(uriCol)
-                    val mediaType = it.getString(typeCol)
-                    val description = it.getString(descCol) ?: ""
-                    
-                    val fileId = try {
-                        if (description.startsWith("FILE_ID:")) {
-                            description.substringAfter("FILE_ID:").toIntOrNull()
-                        } else null
-                    } catch (e: Exception) { null }
-
-                    // Calculate speed
-                    var speed = 0L
-                    if (status == DownloadManager.STATUS_RUNNING) {
-                        val lastSize = lastSizeMap[id] ?: 0L
-                        val lastTime = lastTimeMap[id] ?: 0L
-                        
-                        if (lastTime > 0 && currentTime > lastTime) {
-                            val sizeDiff = downloadedSize - lastSize
-                            val timeDiff = currentTime - lastTime
-                            if (sizeDiff > 0) {
-                                speed = (sizeDiff * 1000) / timeDiff
-                            }
-                        }
-                        
-                        lastSizeMap[id] = downloadedSize
-                        lastTimeMap[id] = currentTime
-                    } else {
-                        lastSizeMap.remove(id)
-                        lastTimeMap.remove(id)
-                    }
-
-                    items.add(DownloadItem(id, title, status, totalSize, downloadedSize, speed, localUri, mediaType, fileId))
-                } while (it.moveToNext())
-            }
-        }
-        
-        // Sort by ID descending (newest first)
-        items.sortByDescending { it.id }
-
-        _uiState.value = _uiState.value.copy(downloads = items)
-    }
-    
-    fun deleteDownload(downloadId: Long) {
+    /**
+     * Start a new download.
+     */
+    fun startDownload(fileId: Int, fileName: String, mimeType: String? = null) {
         viewModelScope.launch {
-            downloadManager.remove(downloadId)
-            loadDownloads()
+            val serverUrl = settingsRepository.getServerUrl()
+            val token = authRepository.getAccessToken()
+            val url = if (token != null) {
+                "$serverUrl/api/stream/$fileId?token=$token"
+            } else {
+                "$serverUrl/api/stream/$fileId"
+            }
+            fileDownloader.enqueue(fileId, fileName, url, mimeType)
         }
+    }
+
+    fun pauseDownload(id: Long) {
+        fileDownloader.pause(id)
+    }
+
+    fun resumeDownload(id: Long) {
+        fileDownloader.resume(id)
+    }
+
+    fun cancelDownload(id: Long) {
+        fileDownloader.cancel(id)
+    }
+
+    fun deleteDownload(id: Long) {
+        fileDownloader.deleteFile(id)
     }
 }

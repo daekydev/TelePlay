@@ -102,6 +102,7 @@ fun MobileHomeScreen(
             item {
                 HomeHeader(
                     folderName = uiState.currentFolderName,
+                    userName = uiState.userName,
                     onSearchClick = onSearchClick,
                     onLogoutClick = { showLogoutDialog = true }
                 )
@@ -445,9 +446,21 @@ fun SelectionActionBar(
 @Composable
 fun HomeHeader(
     folderName: String,
+    userName: String? = null,
     onSearchClick: () -> Unit,
     onLogoutClick: () -> Unit
 ) {
+    // Dynamic greeting based on time of day
+    val greeting = remember {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        when (hour) {
+            in 5..11 -> "Good Morning"
+            in 12..16 -> "Good Afternoon"
+            in 17..20 -> "Good Evening"
+            else -> "Good Night"
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -467,7 +480,9 @@ fun HomeHeader(
                 .padding(20.dp)
         ) {
             Text(
-                text = if (folderName == "Home") "Good Evening," else folderName,
+                text = if (folderName == "Home") {
+                    if (userName != null) "$greeting, $userName" else "$greeting,"
+                } else folderName,
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.Bold

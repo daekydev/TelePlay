@@ -1,6 +1,5 @@
 package com.telegramtv.ui.mobile.downloads
 
-import android.app.DownloadManager
 import android.text.format.Formatter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,8 +11,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.telegramtv.download.DownloadStatus
 import com.telegramtv.ui.theme.*
 
 @Composable
@@ -99,7 +100,9 @@ fun MobileDownloadsScreen(
                 items(uiState.downloads, key = { it.id }) { item ->
                     DownloadItemCard(
                         item = item,
-                        onDelete = { deleteId = item.id }
+                        onDelete = { deleteId = item.id },
+                        onPause = { viewModel.pauseDownload(item.id) },
+                        onResume = { viewModel.resumeDownload(item.id) }
                     )
                 }
             }
@@ -110,29 +113,14 @@ fun MobileDownloadsScreen(
 @Composable
 fun DownloadItemCard(
     item: DownloadItem,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit
 ) {
     val context = LocalContext.current
     
     GlassmorphismSurface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = item.status == DownloadManager.STATUS_SUCCESSFUL) {
-                // Play local file
-                item.fileId?.let { fileId ->
-                    try {
-                        android.content.Intent(context, com.telegramtv.ui.mobile.MobileMainActivity::class.java).apply {
-                            putExtra("fileId", fileId)
-                            // The PlayerViewModel inside MobilePlayerScreen will detect the local file by filename
-                            // so we just navigate to the player with this fileId.
-                        }
-                        // This might need handling in MobileApp navigation, 
-                        // but a simple way is to use the existing player navigation.
-                        // Since we aren't in a NavHost scope, we might need a callback.
-                        // For now, let's assume we can trigger navigation or similar.
-                    } catch (e: Exception) {}
-                }
-            }
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
@@ -142,15 +130,18 @@ fun DownloadItemCard(
         ) {
             // Icon based on status
             val icon = when (item.status) {
-                DownloadManager.STATUS_SUCCESSFUL -> Icons.Default.DownloadDone
-                DownloadManager.STATUS_FAILED -> Icons.Default.Error
-                DownloadManager.STATUS_PAUSED -> Icons.Default.Pause
-                else -> Icons.Default.Download
+                DownloadStatus.COMPLETED -> Icons.Default.DownloadDone
+                DownloadStatus.FAILED -> Icons.Default.Error
+                DownloadStatus.PAUSED -> Icons.Default.Pause
+                DownloadStatus.RUNNING -> Icons.Default.Download
+                DownloadStatus.PENDING -> Icons.Default.Download
+                DownloadStatus.CANCELLED -> Icons.Default.Error
             }
             
             val iconColor = when (item.status) {
-                DownloadManager.STATUS_SUCCESSFUL -> MaterialTheme.colorScheme.primary
-                DownloadManager.STATUS_FAILED -> MaterialTheme.colorScheme.error
+                DownloadStatus.COMPLETED -> MaterialTheme.colorScheme.primary
+                DownloadStatus.FAILED, DownloadStatus.CANCELLED -> MaterialTheme.colorScheme.error
+                DownloadStatus.PAUSED -> MobilePrimary
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
 
@@ -168,8 +159,8 @@ fun DownloadItemCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 
-                // Progress & Speed
-                if (item.status == DownloadManager.STATUS_RUNNING) {
+                // Progress & Speed for running downloads
+                if (item.status == DownloadStatus.RUNNING) {
                      val progress = if (item.totalSize > 0) item.downloadedSize.toFloat() / item.totalSize else 0f
                      LinearProgressIndicator(
                          progress = { progress },
@@ -194,35 +185,56 @@ fun DownloadItemCard(
                              color = Color.White.copy(alpha = 0.5f)
                          )
                      }
+                } else if (item.status == DownloadStatus.PAUSED && item.totalSize > 0) {
+                    // Show progress bar for paused items
+                    val progress = item.downloadedSize.toFloat() / item.totalSize
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Paused • ${(progress * 100).toInt()}% • ${Formatter.formatFileSize(context, item.downloadedSize)} / ${Formatter.formatFileSize(context, item.totalSize)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MobilePrimary
+                    )
                 } else {
-                    Row {
-                        Text(
-                            text = when(item.status) {
-                                DownloadManager.STATUS_PENDING -> "Pending"
-                                DownloadManager.STATUS_PAUSED -> "Paused"
-                                DownloadManager.STATUS_SUCCESSFUL -> "Completed • ${Formatter.formatFileSize(context, item.totalSize)}"
-                                DownloadManager.STATUS_FAILED -> "Failed"
-                                else -> "Unknown"
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                    Text(
+                        text = when(item.status) {
+                            DownloadStatus.PENDING -> "Pending"
+                            DownloadStatus.PAUSED -> "Paused"
+                            DownloadStatus.COMPLETED -> "Completed • ${Formatter.formatFileSize(context, item.totalSize)}"
+                            DownloadStatus.FAILED -> "Failed${item.title.let { "" }}"
+                            DownloadStatus.CANCELLED -> "Cancelled"
+                            else -> ""
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
 
-            if (item.status == DownloadManager.STATUS_SUCCESSFUL) {
+            // Pause button for running/pending downloads
+            if (item.status == DownloadStatus.RUNNING || item.status == DownloadStatus.PENDING) {
+                IconButton(onClick = onPause) {
+                    Icon(Icons.Default.Pause, "Pause", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            // Resume button for paused/failed downloads
+            if (item.status == DownloadStatus.PAUSED || item.status == DownloadStatus.FAILED) {
+                IconButton(onClick = onResume) {
+                    Icon(Icons.Default.PlayArrow, "Resume", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            // Open file button for completed downloads
+            if (item.status == DownloadStatus.COMPLETED) {
                 IconButton(onClick = {
                     try {
-                        val file = item.localUri?.let { uriString ->
-                            val uri = android.net.Uri.parse(uriString)
-                            if (uri.scheme == "file") {
-                                java.io.File(uri.path ?: "")
-                            } else {
-                                // Potentially handle content URIs or others
-                                null
-                            }
-                        }
+                        val file = item.localPath?.let { java.io.File(it) }
                         
                         if (file != null && file.exists()) {
                             val contentUri = androidx.core.content.FileProvider.getUriForFile(
@@ -231,12 +243,12 @@ fun DownloadItemCard(
                                 file
                             )
                             val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                                setDataAndType(contentUri, item.mediaType ?: "video/*")
+                                setDataAndType(contentUri, item.mimeType ?: "video/*")
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             context.startActivity(android.content.Intent.createChooser(intent, "Open with"))
                         } else {
-                            android.widget.Toast.makeText(context, "File not found at: ${item.localUri}", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, "File not found", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     } catch (e: Exception) {
                         android.widget.Toast.makeText(context, "Cannot open file: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()

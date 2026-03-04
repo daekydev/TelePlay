@@ -36,7 +36,8 @@ class SearchViewModel @Inject constructor(
     private val filesRepository: FilesRepository,
     private val foldersRepository: com.telegramtv.data.repository.FoldersRepository,
     private val settingsRepository: SettingsRepository,
-    private val authRepository: com.telegramtv.data.repository.AuthRepository
+    private val authRepository: com.telegramtv.data.repository.AuthRepository,
+    private val fileDownloader: com.telegramtv.download.FileDownloader
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -157,20 +158,8 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             val serverUrl = _uiState.value.serverUrl
             if (serverUrl.isEmpty()) return@launch
-            val token = authRepository.getAccessToken()
-            
-            val downloadManager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-            val uri = android.net.Uri.parse("$serverUrl/api/stream/${file.id}")
-            
-            val request = android.app.DownloadManager.Request(uri)
-                .setTitle(file.fileName)
-                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, file.fileName)
-            
-            if (token != null) {
-                request.addRequestHeader("Authorization", "Bearer $token")
-            }
-            downloadManager.enqueue(request)
+            val url = "$serverUrl/api/stream/${file.id}"
+            fileDownloader.enqueue(file.id, file.fileName, url, file.mimeType)
         }
     }
 

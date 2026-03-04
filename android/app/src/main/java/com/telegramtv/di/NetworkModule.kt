@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.telegramtv.download.FileDownloader
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -26,6 +27,33 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
+
+    @Provides
+    @Singleton
+    fun provideFileDownloader(
+        @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context,
+        authInterceptor: AuthInterceptor
+    ): FileDownloader {
+        // Create a dedicated OkHttpClient for downloads:
+        // - NO body logging (Level.BODY buffers entire response into memory, killing large downloads)
+        // - Longer read timeout for large files
+        // - Auth interceptor for automatic token handling
+        val downloadLogging = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.HEADERS
+        }
+        val downloadClient = OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
+            .addInterceptor(downloadLogging)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.MINUTES)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+
+        val scope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
+        return FileDownloader(context, downloadClient, scope)
+    }
 
     @Provides
     @Singleton

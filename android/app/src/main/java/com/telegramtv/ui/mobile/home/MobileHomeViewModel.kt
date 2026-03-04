@@ -31,7 +31,8 @@ data class MobileHomeUiState(
     val error: String? = null,
     val parentFolderId: Int? = null,
     val selectedFileIds: Set<Int> = emptySet(),
-    val selectedFolderIds: Set<Int> = emptySet()
+    val selectedFolderIds: Set<Int> = emptySet(),
+    val userName: String? = null
 ) {
     val isMultiSelectMode: Boolean get() = selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()
 }
@@ -43,6 +44,7 @@ class MobileHomeViewModel @Inject constructor(
     private val foldersRepository: FoldersRepository,
     private val settingsRepository: com.telegramtv.data.repository.SettingsRepository,
     private val authRepository: com.telegramtv.data.repository.AuthRepository,
+    private val fileDownloader: com.telegramtv.download.FileDownloader,
     savedStateHandle: androidx.lifecycle.SavedStateHandle
 ) : ViewModel() {
 
@@ -68,6 +70,13 @@ class MobileHomeViewModel @Inject constructor(
         
         // Initial load for things that don't depend on folderId (like serverUrl)
         refresh()
+
+        // Load user name
+        viewModelScope.launch {
+            authRepository.userName.collect { name ->
+                _uiState.value = _uiState.value.copy(userName = name)
+            }
+        }
     }
 
     fun loadContent(folderId: Int? = null, folderName: String = "Home") {
@@ -253,24 +262,8 @@ class MobileHomeViewModel @Inject constructor(
     fun downloadFile(file: FileItem) {
         viewModelScope.launch {
             val serverUrl = settingsRepository.getServerUrl()
-            val token = authRepository.getAccessToken() // Keep generic if possible, or use specific method
-            
-            val downloadManager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-            val uri = android.net.Uri.parse("$serverUrl/api/stream/${file.id}")
-            
-            val request = android.app.DownloadManager.Request(uri)
-                .setTitle(file.fileName)
-                .setDescription("FILE_ID:${file.id}")
-                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, file.fileName)
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(true)
-            
-            if (token != null) {
-                request.addRequestHeader("Authorization", "Bearer $token")
-            }
-                
-            downloadManager.enqueue(request)
+            val url = "$serverUrl/api/stream/${file.id}"
+            fileDownloader.enqueue(file.id, file.fileName, url, file.mimeType)
         }
     }
     

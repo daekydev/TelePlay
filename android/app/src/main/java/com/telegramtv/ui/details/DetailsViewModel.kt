@@ -50,7 +50,8 @@ class DetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val filesRepository: FilesRepository,
     private val settingsRepository: SettingsRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val fileDownloader: com.telegramtv.download.FileDownloader
 ) : ViewModel() {
 
     private val fileId: Int = savedStateHandle.get<Int>("fileId") ?: 0
@@ -200,7 +201,7 @@ class DetailsViewModel @Inject constructor(
     }
 
     /**
-     * Download file to device storage using Android DownloadManager.
+     * Download file using the custom FileDownloader (supports pause/resume).
      */
     fun startDownload(context: Context) {
         val file = _uiState.value.file ?: return
@@ -208,69 +209,20 @@ class DetailsViewModel @Inject constructor(
         if (serverUrl.isBlank()) return
 
         // Prevent multiple downloads
-        if (_uiState.value.downloadId != null && _uiState.value.downloadStatus == DownloadManager.STATUS_RUNNING) {
-            return
-        }
+        if (_uiState.value.downloadStarted) return
 
         viewModelScope.launch {
             try {
-                val token = authRepository.getAccessToken()
-                if (token.isNullOrBlank()) {
-                    Toast.makeText(context, "Not authenticated", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
+                val url = "$serverUrl/api/stream/$fileId"
+                fileDownloader.enqueue(fileId, file.fileName, url, file.mimeType)
 
-                // Build download URL with ?download=1 to force Content-Disposition: attachment
-                val downloadUrl = "$serverUrl/api/stream/$fileId?download=1"
+                _uiState.value = _uiState.value.copy(downloadStarted = true)
 
-                val request = DownloadManager.Request(Uri.parse(downloadUrl)).apply {
-                    // Add auth header
-                    addRequestHeader("Authorization", "Bearer $token")
-
-                    // Save to Downloads folder
-                    setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS,
-                        file.fileName
-                    )
-
-                    // Show notification during & after download
-                    setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                    )
-                    setTitle(file.fileName)
-                    setDescription("Downloading from TelegramTV")
-
-                    // Set MIME type
-                    file.mimeType?.let { setMimeType(it) }
-
-                    // Allow mobile & wifi
-                    setAllowedNetworkTypes(
-                        DownloadManager.Request.NETWORK_WIFI or
-                        DownloadManager.Request.NETWORK_MOBILE
-                    )
-                }
-
-                val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                val id = downloadManager.enqueue(request)
-
-                _uiState.value = _uiState.value.copy(
-                    downloadStarted = true,
-                    downloadId = id,
-                    downloadStatus = DownloadManager.STATUS_PENDING,
-                    downloadProgress = 0,
-                    downloadedBytes = 0L,
-                    totalBytes = -1L,
-                    downloadSpeed = 0L
-                )
-                
                 Toast.makeText(
                     context,
                     "⬇ Downloading: ${file.fileName}",
                     Toast.LENGTH_SHORT
                 ).show()
-
-                // Start tracking progress
-                trackDownloadProgress(context, id)
 
             } catch (e: Exception) {
                 Toast.makeText(
@@ -282,77 +234,6 @@ class DetailsViewModel @Inject constructor(
                     downloadStarted = false,
                     error = e.message
                 )
-            }
-        }
-    }
-
-    /**
-     * Poll DownloadManager for progress updates until finished.
-     */
-    private fun trackDownloadProgress(context: Context, downloadId: Long) {
-        viewModelScope.launch {
-            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            var isDownloading = true
-            var lastBytes = 0L
-            var lastTime = System.currentTimeMillis()
-
-            while (isDownloading) {
-                val query = DownloadManager.Query().setFilterById(downloadId)
-                val cursor = downloadManager.query(query)
-
-                if (cursor != null && cursor.moveToFirst()) {
-                    val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                    val downloadedIndex = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                    val totalIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-
-                    if (statusIndex >= 0) {
-                        val status = cursor.getInt(statusIndex)
-                        val downloaded = if (downloadedIndex >= 0) cursor.getLong(downloadedIndex) else 0L
-                        val total = if (totalIndex >= 0) cursor.getLong(totalIndex) else -1L
-
-                        val progress = if (total > 0) ((downloaded * 100) / total).toInt() else 0
-
-                        // Calculate speed
-                        val now = System.currentTimeMillis()
-                        val timeDelta = (now - lastTime).coerceAtLeast(1)
-                        val bytesDelta = downloaded - lastBytes
-                        val speed = if (timeDelta > 0) (bytesDelta * 1000) / timeDelta else 0L
-
-                        lastBytes = downloaded
-                        lastTime = now
-
-                        _uiState.value = _uiState.value.copy(
-                            downloadStatus = status,
-                            downloadProgress = progress,
-                            downloadedBytes = downloaded,
-                            totalBytes = total,
-                            downloadSpeed = speed
-                        )
-
-                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                            isDownloading = false
-                            // Update local file state
-                            val fileName = _uiState.value.file?.fileName ?: ""
-                            val downloadsDir = Environment.getExternalStoragePublicDirectory(
-                                Environment.DIRECTORY_DOWNLOADS
-                            )
-                            val localFile = File(downloadsDir, fileName)
-                            _uiState.value = _uiState.value.copy(
-                                isFileLocal = true,
-                                localFilePath = localFile.absolutePath
-                            )
-                        } else if (status == DownloadManager.STATUS_FAILED) {
-                            isDownloading = false
-                        }
-                    }
-                    cursor.close()
-                } else {
-                    isDownloading = false // Download not found
-                }
-
-                if (isDownloading) {
-                    kotlinx.coroutines.delay(1000) // Poll every second
-                }
             }
         }
     }
